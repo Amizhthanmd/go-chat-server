@@ -60,6 +60,16 @@ func HttpRouter(PORT string, c *controllers.Controller) {
 		}
 	})
 
+	http.HandleFunc("/api/v1/rooms/users", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			c.GetRoomsUsers(w, r)
+		default:
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	})
+
 	http.HandleFunc("/api/v1/rooms/send", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
