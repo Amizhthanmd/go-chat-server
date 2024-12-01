@@ -1,11 +1,11 @@
 package models
 
 type User struct {
-	DisplayName string `json:"display_name"`
+	DisplayName string `json:"display_name" binding:"required"`
 }
 type JoinRoom struct {
-	RoomId string `json:"room_id"`
-	UserId string `json:"user_id"`
+	RoomId string `json:"room_id" binding:"required"`
+	UserId string `json:"user_id" binding:"required"`
 }
 
 type RoomUser struct {
