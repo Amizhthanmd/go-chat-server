@@ -98,6 +98,7 @@ func (c *Controller) JoinChat(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			// Remove the user in the chat is disconnect
 			c.Mutex.Lock()
 			delete(c.UserChat, userID)
 			c.Mutex.Unlock()
@@ -137,6 +138,7 @@ func (c *Controller) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Send message the channel of the user
 	message := fmt.Sprintf(`{"name": "%s", "message": "%s"}`, c.Users[reqPayload.SenderID], reqPayload.Message)
 	receiverChannel <- message
 

@@ -23,6 +23,7 @@ func HttpRouter(PORT string, c *controllers.Controller) {
 		}
 	})
 
+	// Routes to chat individual users
 	http.HandleFunc("/api/v1/users/chat", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -50,6 +51,7 @@ func HttpRouter(PORT string, c *controllers.Controller) {
 		}
 	})
 
+	// Route to join an existing room
 	http.HandleFunc("/api/v1/rooms/join", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -60,6 +62,7 @@ func HttpRouter(PORT string, c *controllers.Controller) {
 		}
 	})
 
+	// Route to get an users in the rooms
 	http.HandleFunc("/api/v1/rooms/users", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -70,6 +73,7 @@ func HttpRouter(PORT string, c *controllers.Controller) {
 		}
 	})
 
+	// Route to send the message to the room
 	http.HandleFunc("/api/v1/rooms/send", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")

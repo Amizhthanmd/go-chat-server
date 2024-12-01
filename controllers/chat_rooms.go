@@ -75,12 +75,14 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.Mutex.Lock()
+	// Check if the user is exist in the users list
 	if _, exists := c.Users[room.UserId]; !exists {
 		c.Mutex.Unlock()
 		c.logger.Error("User not found", zap.String("user_id", room.UserId))
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
+	// Check if the joining room is present in the rooms list
 	if _, exists := c.Rooms[room.RoomId]; !exists {
 		c.Mutex.Unlock()
 		c.logger.Error("Room not found", zap.String("room_id", room.RoomId))
@@ -90,6 +92,7 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 
 	msgChannel := make(chan map[string]string)
 	c.RoomChannels[room.RoomId] = append(c.RoomChannels[room.RoomId], msgChannel)
+	// Add the users to the rooms list
 	c.ActiveRoomUsers[room.RoomId] = append(c.ActiveRoomUsers[room.RoomId], models.RoomUser{
 		UserId: room.UserId,
 		Name:   c.Users[room.UserId],
@@ -102,6 +105,7 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Send the initial sse connection message
 	_, err = w.Write([]byte("data: {\"message\": \"Connected to room\"}\n\n"))
 	if err != nil {
 		c.logger.Error("Error sending initial message", zap.Error(err))
@@ -112,6 +116,7 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			// Remove users in the room if disconnected
 			c.Mutex.Lock()
 			for i, client := range c.RoomChannels[room.RoomId] {
 				if client == msgChannel {
@@ -189,7 +194,7 @@ func (c *Controller) SendMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "User not in the room", http.StatusForbidden)
 		return
 	}
-
+	// Send message to all the users in the room
 	for _, roomChannel := range c.RoomChannels[roomId] {
 		roomChannel <- map[string]string{
 			"name":    userName,
@@ -213,18 +218,25 @@ func (c *Controller) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 func (c *Controller) GetRoomsUsers(w http.ResponseWriter, r *http.Request) {
 	roomId := r.URL.Query().Get("room_id")
-	user_Id := r.URL.Query().Get("user_id")
-	if roomId == "" || user_Id == "" {
+	userId := r.URL.Query().Get("user_id")
+	if roomId == "" || userId == "" {
 		c.logger.Error("Valid query not found in URL")
 		http.Error(w, "Valid query not found in URL", http.StatusBadRequest)
 		return
 	}
+
+	// Check users present in the current room
+	var userFound = false
 	for _, user := range c.ActiveRoomUsers[roomId] {
-		if user.UserId != user_Id {
-			c.logger.Error("You are not in the room", zap.String("room name", c.Rooms[roomId]))
-			http.Error(w, "You are not in the room", http.StatusNotFound)
-			return
+		if user.UserId == userId {
+			userFound = true
+			break
 		}
+	}
+	if !userFound {
+		c.logger.Error("You are not in the room", zap.String("room name", c.Rooms[roomId]))
+		http.Error(w, "You are not in the room", http.StatusNotFound)
+		return
 	}
 
 	if _, exists := c.ActiveRoomUsers[roomId]; !exists {
