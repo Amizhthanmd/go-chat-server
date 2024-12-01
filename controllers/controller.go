@@ -14,7 +14,7 @@ type Controller struct {
 	RoomChannels    map[string][]chan map[string]string
 	ActiveRoomUsers map[string][]models.RoomUser
 	UserChat        map[string]chan string
-	sync.Mutex
+	Mutex           sync.Mutex
 }
 
 func NewController(logger *zap.Logger) *Controller {
@@ -25,6 +25,7 @@ func NewController(logger *zap.Logger) *Controller {
 		RoomChannels:    make(map[string][]chan map[string]string),
 		ActiveRoomUsers: make(map[string][]models.RoomUser),
 		UserChat:        make(map[string]chan string),
+		Mutex:           sync.Mutex{},
 	}
 }
 

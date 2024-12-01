@@ -71,6 +71,8 @@ func (c *Controller) JoinChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "User ID not found in URL query", http.StatusBadRequest)
 		return
 	}
+
+	c.Mutex.Lock()
 	if _, exists := c.Users[userID]; !exists {
 		c.logger.Error("User not found", zap.String("user_id", userID))
 		http.Error(w, "User not found", http.StatusNotFound)
@@ -79,14 +81,26 @@ func (c *Controller) JoinChat(w http.ResponseWriter, r *http.Request) {
 
 	messageChan := make(chan string)
 	c.UserChat[userID] = messageChan
+	c.Mutex.Unlock()
 
-	defer func() {
-		delete(c.UserChat, userID)
-	}()
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+	_, err := w.Write([]byte("data: {\"message\": \"Connected to chat\"}\n\n"))
+	if err != nil {
+		c.logger.Error("Error sending initial message", zap.Error(err))
+		return
+	}
+	flusher.Flush()
 
 	for {
 		select {
 		case <-r.Context().Done():
+			c.Mutex.Lock()
+			delete(c.UserChat, userID)
+			c.Mutex.Unlock()
 			return
 		case message := <-messageChan:
 			_, err := w.Write([]byte("data: " + message + "\n\n"))
@@ -94,9 +108,7 @@ func (c *Controller) JoinChat(w http.ResponseWriter, r *http.Request) {
 				c.logger.Error("Error writing to response", zap.Error(err))
 				return
 			}
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
+			flusher.Flush()
 		}
 	}
 }
@@ -114,6 +126,9 @@ func (c *Controller) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error decoding body", http.StatusBadRequest)
 		return
 	}
+
+	c.Mutex.Lock()
+	defer c.Mutex.Unlock()
 
 	receiverChannel, exists := c.UserChat[reqPayload.ReceiverID]
 	if !exists {

@@ -74,12 +74,15 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	c.Mutex.Lock()
 	if _, exists := c.Users[room.UserId]; !exists {
+		c.Mutex.Unlock()
 		c.logger.Error("User not found", zap.String("user_id", room.UserId))
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
 	if _, exists := c.Rooms[room.RoomId]; !exists {
+		c.Mutex.Unlock()
 		c.logger.Error("Room not found", zap.String("room_id", room.RoomId))
 		http.Error(w, "Room not found", http.StatusNotFound)
 		return
@@ -91,52 +94,59 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 		UserId: room.UserId,
 		Name:   c.Users[room.UserId],
 	})
+	c.Mutex.Unlock()
 
-	defer func() {
-		for i, client := range c.RoomChannels[room.RoomId] {
-			if client == msgChannel {
-				c.RoomChannels[room.RoomId] = append(c.RoomChannels[room.RoomId][:i], c.RoomChannels[room.RoomId][i+1:]...)
-				break
-			}
-		}
-		for i, v := range c.ActiveRoomUsers[room.RoomId] {
-			if v.UserId == room.UserId {
-				c.ActiveRoomUsers[room.RoomId] = append(c.ActiveRoomUsers[room.RoomId][:i], c.ActiveRoomUsers[room.RoomId][i+1:]...)
-				break
-			}
-		}
-	}()
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	_, err = w.Write([]byte("data: {\"message\": \"Connected to room\"}\n\n"))
+	if err != nil {
+		c.logger.Error("Error sending initial message", zap.Error(err))
+		return
+	}
+	flusher.Flush()
 
 	for {
 		select {
 		case <-r.Context().Done():
+			c.Mutex.Lock()
+			for i, client := range c.RoomChannels[room.RoomId] {
+				if client == msgChannel {
+					c.RoomChannels[room.RoomId] = append(c.RoomChannels[room.RoomId][:i], c.RoomChannels[room.RoomId][i+1:]...)
+					break
+				}
+			}
+			for i, v := range c.ActiveRoomUsers[room.RoomId] {
+				if v.UserId == room.UserId {
+					c.ActiveRoomUsers[room.RoomId] = append(c.ActiveRoomUsers[room.RoomId][:i], c.ActiveRoomUsers[room.RoomId][i+1:]...)
+					break
+				}
+			}
+			c.Mutex.Unlock()
 			return
-		case msg := <-msgChannel:
+		case msg, ok := <-msgChannel:
+			if !ok {
+				return
+			}
 			messageData := fmt.Sprintf("data: {\"name\": \"%s\", \"message\": \"%s\"}\n\n", msg["name"], msg["message"])
 			_, err := w.Write([]byte(messageData))
 			if err != nil {
 				c.logger.Error("Error writing to response", zap.Error(err))
-				fmt.Println("Error writing to response:", err)
 				return
 			}
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
+			flusher.Flush()
 		}
 	}
 }
 
 func (c *Controller) SendMessage(w http.ResponseWriter, r *http.Request) {
-	var roomId string
-	roomId = r.URL.Query().Get("room_id")
+	roomId := r.URL.Query().Get("room_id")
 	if roomId == "" {
 		c.logger.Error("Room ID not found in URL query")
 		http.Error(w, "Room ID not found in URL query", http.StatusBadRequest)
-		return
-	}
-	if _, exists := c.RoomChannels[roomId]; !exists {
-		c.logger.Error("Room not found", zap.String("room_id", roomId))
-		http.Error(w, "Room not found", http.StatusNotFound)
 		return
 	}
 
@@ -150,22 +160,39 @@ func (c *Controller) SendMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error decoding body", http.StatusBadRequest)
 		return
 	}
-	if _, exists := c.Users[message.UserId]; !exists {
+
+	c.Mutex.Lock()
+	defer c.Mutex.Unlock()
+
+	userName, userExists := c.Users[message.UserId]
+	if !userExists {
 		c.logger.Error("User not found", zap.String("user_id", message.UserId))
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
-	for _, roomUser := range c.ActiveRoomUsers[roomId] {
-		if roomUser.UserId != message.UserId {
-			c.logger.Error("You are not in the room", zap.String("room name", c.Rooms[roomId]))
-			http.Error(w, "You are not in the room", http.StatusNotFound)
-			return
-		}
+
+	if _, roomExists := c.RoomChannels[roomId]; !roomExists {
+		c.logger.Error("Room not found", zap.String("room_id", roomId))
+		http.Error(w, "Room not found", http.StatusNotFound)
+		return
 	}
 
-	for _, roomChannels := range c.RoomChannels[roomId] {
-		roomChannels <- map[string]string{
-			"name":    c.Users[message.UserId],
+	userInRoom := false
+	for _, roomUser := range c.ActiveRoomUsers[roomId] {
+		if roomUser.UserId == message.UserId {
+			userInRoom = true
+			break
+		}
+	}
+	if !userInRoom {
+		c.logger.Error("User not in room", zap.String("user_id", message.UserId), zap.String("room_id", roomId))
+		http.Error(w, "User not in the room", http.StatusForbidden)
+		return
+	}
+
+	for _, roomChannel := range c.RoomChannels[roomId] {
+		roomChannel <- map[string]string{
+			"name":    userName,
 			"message": message.Message,
 		}
 	}
@@ -175,7 +202,6 @@ func (c *Controller) SendMessage(w http.ResponseWriter, r *http.Request) {
 		Status:  true,
 		Data:    message,
 	}
-	c.logger.Info("Message sent successfully")
 	w.WriteHeader(http.StatusOK)
 	err = json.NewEncoder(w).Encode(&res)
 	if err != nil {
