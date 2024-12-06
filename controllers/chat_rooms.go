@@ -90,7 +90,7 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgChannel := make(chan map[string]string)
+	msgChannel := make(chan Message)
 	c.RoomChannels[room.RoomId] = append(c.RoomChannels[room.RoomId], msgChannel)
 	// Add the users to the rooms list
 	c.ActiveRoomUsers[room.RoomId] = append(c.ActiveRoomUsers[room.RoomId], models.RoomUser{
@@ -136,7 +136,7 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			messageData := fmt.Sprintf("data: {\"name\": \"%s\", \"message\": \"%s\"}\n\n", msg["name"], msg["message"])
+			messageData := fmt.Sprintf("data: {\"name\": \"%s\", \"message\": \"%s\"}\n\n", msg.Name, msg.Message)
 			_, err := w.Write([]byte(messageData))
 			if err != nil {
 				c.logger.Error("Error writing to response", zap.Error(err))
@@ -196,9 +196,9 @@ func (c *Controller) SendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Send message to all the users in the room
 	for _, roomChannel := range c.RoomChannels[roomId] {
-		roomChannel <- map[string]string{
-			"name":    userName,
-			"message": message.Message,
+		roomChannel <- Message{
+			Name:    userName,
+			Message: message.Message,
 		}
 	}
 
