@@ -65,37 +65,36 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Transfer-Encoding", "chunked")
-
-	var room models.JoinRoom
-	err := json.NewDecoder(r.Body).Decode(&room)
-	if err != nil {
-		c.logger.Error("Error decoding body", zap.Error(err))
-		http.Error(w, "Error decoding body", http.StatusBadRequest)
+	roomId := r.URL.Query().Get("room_id")
+	userId := r.URL.Query().Get("user_id")
+	if roomId == "" || userId == "" {
+		c.logger.Error("Valid query not found in URL")
+		http.Error(w, "Valid query not found in URL", http.StatusBadRequest)
 		return
 	}
 
 	c.Mutex.Lock()
 	// Check if the user is exist in the users list
-	if _, exists := c.Users[room.UserId]; !exists {
+	if _, exists := c.Users[userId]; !exists {
 		c.Mutex.Unlock()
-		c.logger.Error("User not found", zap.String("user_id", room.UserId))
+		c.logger.Error("User not found", zap.String("user_id", userId))
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
 	// Check if the joining room is present in the rooms list
-	if _, exists := c.Rooms[room.RoomId]; !exists {
+	if _, exists := c.Rooms[roomId]; !exists {
 		c.Mutex.Unlock()
-		c.logger.Error("Room not found", zap.String("room_id", room.RoomId))
+		c.logger.Error("Room not found", zap.String("room_id", roomId))
 		http.Error(w, "Room not found", http.StatusNotFound)
 		return
 	}
 
 	msgChannel := make(chan Message)
-	c.RoomChannels[room.RoomId] = append(c.RoomChannels[room.RoomId], msgChannel)
+	c.RoomChannels[roomId] = append(c.RoomChannels[roomId], msgChannel)
 	// Add the users to the rooms list
-	c.ActiveRoomUsers[room.RoomId] = append(c.ActiveRoomUsers[room.RoomId], models.RoomUser{
-		UserId: room.UserId,
-		Name:   c.Users[room.UserId],
+	c.ActiveRoomUsers[roomId] = append(c.ActiveRoomUsers[roomId], models.RoomUser{
+		UserId: userId,
+		Name:   c.Users[userId],
 	})
 	c.Mutex.Unlock()
 
@@ -106,7 +105,7 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Send the initial sse connection message
-	_, err = w.Write([]byte("data: {\"message\": \"Connected to room\"}\n\n"))
+	_, err := w.Write([]byte("data: {\"message\": \"Connected to room\"}\n\n"))
 	if err != nil {
 		c.logger.Error("Error sending initial message", zap.Error(err))
 		return
@@ -118,15 +117,15 @@ func (c *Controller) JoinRoom(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			// Remove users in the room if disconnected
 			c.Mutex.Lock()
-			for i, client := range c.RoomChannels[room.RoomId] {
+			for i, client := range c.RoomChannels[roomId] {
 				if client == msgChannel {
-					c.RoomChannels[room.RoomId] = append(c.RoomChannels[room.RoomId][:i], c.RoomChannels[room.RoomId][i+1:]...)
+					c.RoomChannels[roomId] = append(c.RoomChannels[roomId][:i], c.RoomChannels[roomId][i+1:]...)
 					break
 				}
 			}
-			for i, v := range c.ActiveRoomUsers[room.RoomId] {
-				if v.UserId == room.UserId {
-					c.ActiveRoomUsers[room.RoomId] = append(c.ActiveRoomUsers[room.RoomId][:i], c.ActiveRoomUsers[room.RoomId][i+1:]...)
+			for i, v := range c.ActiveRoomUsers[roomId] {
+				if v.UserId == userId {
+					c.ActiveRoomUsers[roomId] = append(c.ActiveRoomUsers[roomId][:i], c.ActiveRoomUsers[roomId][i+1:]...)
 					break
 				}
 			}
